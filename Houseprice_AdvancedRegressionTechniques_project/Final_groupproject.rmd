@@ -1,0 +1,352 @@
+---
+title: "Final report _ Group - Akansha,Abhishek,Rajashree"
+output:
+  html_notebook: default
+  pdf_document: default
+---
+## Exploratory Data Analyis and Data Cleaning
+###Step 1 : Train Data Import & EDA
+###Step 2 : Removed the columns which are having most of NA's 
+###Step 3 : Test Data Import and perfoming EDA as performed on Train
+###Step 4 : Imputed rest of the columns of Train and Test dataset using MissForest
+
+```{r}
+library(arm)
+library(caret)
+library(dplyr)
+library(missForest)
+library(randomForest)
+library(MASS)
+
+# Import train Data
+train_data <- read.csv(file.choose(),stringsAsFactors = FALSE)
+# Most of NA' found in below variables :
+# Alley, Fence , MiscFeature 
+# So removing those 4 Alley,Fence,Miscfeature,PoolQC columns Fence,MiscFeature,Alley
+train_data <- train_data[-7]
+train_data <-  subset(train_data, select=-c(Fence,MiscFeature,PoolQC))
+
+#Importing Test Data
+test_data <- read.csv(file.choose(),stringsAsFactors = FALSE)
+# Most of NA' found in below variables :
+# Alley, Fence , MiscFeature 
+# So removing those 4 Alley,Fence,Miscfeature,PoolQC columns Fence,MiscFeature,Alley
+test_data <- test_data[-7]
+test_data <-  subset(test_data, select=-c(Fence,MiscFeature,PoolQC))
+
+
+#Cleaning Function for Train Data Set
+elements <- names(train_data)
+elements <- elements[elements != "SalePrice"] 
+for(i in elements)
+{
+  if(any(is.na(train_data[[i]])))
+  {
+    if(is.character(train_data[[i]]))
+    {
+      train_data[[i]][is.na(train_data[[i]])] <- "zero"
+      }
+  }
+}
+
+for(i in elements)
+{
+  if(is.character(train_data[[i]]))
+  {
+    levels <- sort(unique(c(train_data[[i]])))
+    train_data[[i]] <- factor(train_data[[i]],levels=levels)
+  }
+}
+
+for (i in elements) {
+  if(class(levels(train_data[[i]])) == "character")
+    train_data[[i]] <- seq_along(levels(train_data[[i]]))[train_data[[i]]]
+}
+
+
+#Imputation Using MissForest
+set.seed(1234)
+newtrain_data<-missForest(train_data)
+summary(newtrain_data$ximp)
+train_data<-newtrain_data$ximp
+
+#Cleaning Function for Test Data
+elements <- names(test_data)
+elements <- elements[elements != "SalePrice"] 
+for(i in elements)
+{
+  if(any(is.na(test_data[[i]])))
+  {
+    if(is.character(test_data[[i]]))
+    {
+      test_data[[i]][is.na(test_data[[i]])] <- "zero"
+      }
+  }
+}
+
+for(i in elements)
+{
+  if(is.character(test_data[[i]]))
+  {
+    levels <- sort(unique(c(test_data[[i]])))
+    test_data[[i]] <- factor(test_data[[i]],levels=levels)
+  }
+}
+
+for (i in elements) {
+  if(class(levels(test_data[[i]])) == "character")
+    test_data[[i]] <- seq_along(levels(test_data[[i]]))[test_data[[i]]]
+}
+
+#Imputation Using MissForest
+set.seed(1234)
+newTest_data<-missForest(test_data)
+summary(newTest_data$ximp)
+test_data<-newTest_data$ximp
+
+```
+## Using StepAIC 
+###Step 5 : Using StepAIC Method for Automatic variable selection
+
+```{r}
+# We used StepAIC method Forward,backward,Both to see the automic variable selection.
+ library(MASS)
+# ForwardStepAIc <- summary(stepAIC(lm(SalePrice ~ ., data=train_data), direction = "forward")) 
+ # 76 variables slected
+#BackwardStepAIc <- summary(stepAIC(lm(SalePrice ~ ., data=train_data), direction = "backward")) 
+# 76 variables
+BothStepAIc <- summary(stepAIC(lm(SalePrice ~ ., data=train_data), direction = "both")) 
+# 47 variables
+
+```
+
+## LM Model 
+###Step 6: Ran the LM model considering all variables
+###Step 7 : Converted SalePrice to Log as the data is right skewed
+###Step 8 : Identified most significant  factors based on Effect size & P value 
+###Step 10: Ran the LM model with the most signnificant 5 predictors based on Forward variable selection method 
+###Step 11: Reporting R^2 and RMSE for Train Data
+```{r}
+
+summary(train_lm <- lm(log(SalePrice)~.,data = train_data))
+
+#Using LM 
+summary(train_lm <- lm(log(SalePrice)~ OverallQual+ExterQual+OverallCond +GrLivArea+TotalBsmtSF+KitchenQual+RoofMatl+GarageArea+YearBuilt+YearRemodAdd+LotArea*Neighborhood+BedroomAbvGr+MSZoning +RoofStyle+HeatingQC+Fireplaces,data = train_data))
+
+rmse <- function(actVal, predVal) {
+  sqrt(mean((actVal - predVal)^2))
+}
+
+# Insample RMSE
+train_Lm_Insample_RMSE <-rmse(train_data$SalePrice, exp(predict(train_lm)))
+train_Lm_Insample_RMSE
+# 49164.74
+
+#Plot of Residual vs Fitted
+plot(train_lm)
+
+```
+
+##Step 12  Cross Validation to find expected RMSE of LM method
+```{r}
+# Cross Validation to find Expected RMSE & R^2
+library(caret)
+train(log(SalePrice)~ OverallQual+OverallCond+ExterQual +GrLivArea+TotalBsmtSF+KitchenQual+RoofMatl+GarageArea+YearBuilt+YearRemodAdd+LotArea*Neighborhood+BedroomAbvGr+MSZoning +RoofStyle+HeatingQC+Fireplaces,
+      data = train_data ,
+      method = "lm", 
+      trControl = trainControl(method="repeatedcv", repeats = 10, number=10))
+print(paste0("Expected out of sample RMSE of Train Data", 0.1569735))
+print(paste0("Expected R^2 of Train ", 0.847025))
+```
+###Step 13: We cross checked LM analysis by comparing it with corelation.
+### For that we found most colrealted numeric predictor which are having corelation > 0.5 
+```{r}
+# We used cor method to find predictors which are having corelation with Sale Price >0.5
+for (col in colnames(train_data)){
+    if(is.numeric(train_data[,col])){
+        if( abs(cor(train_data[,col],train_data$SalePrice)) > 0.5){
+            print(col)
+            print( cor(train_data[,col],train_data$SalePrice) )
+        }
+    }
+}
+
+corr.df <- train_data
+correlations <- cor(corr.df)
+corr.SalePrice <- as.matrix(sort(correlations[,'SalePrice'], decreasing = TRUE))
+corr.idx <- names(which(apply(corr.SalePrice, 1, function(x) (x > 0.5 | x < -0.5))))
+
+install.packages("corrplot")
+library(corrplot)
+corrplot(as.matrix(correlations[corr.idx,corr.idx]), type = 'upper', method='color', addCoef.col = 'black', tl.cex = .7,cl.cex = .7, number.cex=.7)
+
+
+```
+### Step 14 : Ridge Model
+###We ran Ridge model with 10 folde cross validation and identified best lambda values for which we received smallest out of sample RMSE and high Accuracy
+### Step 15 Ridge model with best lambda 
+### Step 16 : Lasso Model
+### Step 17 : Lasso Model with best lambda
+###We ran Lasso model with 10 folde cross validation and identified best lambda values for which we received smallest out of sample RMSE and high Accuracy
+### Step 18 : Mix model 
+### We ran Mix model with 10 folde cross validation and identified best lambda and alpha values for which we received smallest out of sample RMSE and high Accuracy
+### Step 19 : Mix Model with best lambda and alpha 
+We ran Mix model with 10 folde cross validation and identified best lambda values for which we received smallest out of sample RMSE and high Accuracy
+
+
+```{r}
+# Using Ridge model with 10 fold cross validation
+
+ridge_mod <- train(log(SalePrice) ~ ., 
+                   data = train_data,
+                   preProcess = c("center", "scale"),
+                   method = "glmnet",
+                   trControl = trainControl(method="repeatedcv", repeats = 10, number=10),
+                   tuneGrid= expand.grid(
+                     alpha=0,
+                     lambda = seq(0,300, 1)))
+ridge_mod
+#alpha = 0 and lambda = 0.
+#lambda  RMSE      Rsquared   MAE     
+#  0.00    42399.23  0.7483286  19084.64
+ridge1 <- ridge_mod$finalModel$tuneValue
+
+# Using lasso model 10 fold cross validation
+lasso_mod <- train(log(SalePrice) ~ ., 
+                   data = train_data,
+                   preProcess = c("center", "scale"),
+                   method = "glmnet",
+                  trControl = trainControl(method="repeatedcv", repeats = 10, number=10),
+                   tuneGrid= expand.grid(
+                     alpha=1,
+                     lambda = seq(0,5, .01)))
+lasso_mod
+# alpha = 1 and lambda = 0.01.
+# 0.01    0.1465071  0.8667940  0.09419690
+
+######Using 10 fold cross validation with Mix Glmnet model
+mix_mod <- train(log(SalePrice) ~ ., 
+data = train_data,
+preProcess = c("center", "scale"),
+ trControl = trainControl(method="repeatedcv", repeats = 10, number=10),
+method = "glmnet")
+mix_mod
+#alpha = 0.55 and lambda = 0.006526281.
+# 0.55   0.0065262807  0.1425968  0.8719324  0.08984347
+mix_mod$finalModel$tuneValue
+coef(mix_mod$finalModel, mix_mod$finalModel$tuneValue$lambda)
+
+
+#Using the best lambda value received from 10 fold cross validation 
+ridge_mod <- train(log(SalePrice) ~ ., 
+                   data = train_data,
+                   preProcess = c("center", "scale"),
+                   method = "glmnet",
+                   tuneGrid= expand.grid(
+                     alpha=0,
+                     lambda = 0))
+ridge_mod
+# Out of Sample RMSE for Ridge = 0.1632529
+
+lasso_mod <- train(log(SalePrice) ~ ., 
+                   data = train_data,
+                   preProcess = c("center", "scale"),
+                   method = "glmnet",
+                   tuneGrid= expand.grid(
+                     alpha=1,
+                     lambda = 0.01))
+lasso_mod
+# Out of Sample RMSE for Lasso = 0.1509728
+######Mix model
+mix_mod <- train(log(SalePrice) ~ ., 
+data = train_data,
+preProcess = c("center", "scale"),
+method = "glmnet")
+mix_mod
+# Out of Sample RMSE for Mix model = 0.1504904
+
+### Creating the prediction on test data 
+test_predicted_mix <- exp(predict(mix_mod,newdata = test_data))
+head(test_predicted_mix)
+myvars <- c("Id")
+Submission_mix <- test_data[myvars]
+Submission_mix$Saleprice <- test_predicted_mix
+write.csv(Submission_mix, "TestdataSalePrice_mix.csv")
+# Rank 1830
+```
+### Step 20 : Random Forest
+```{r}
+set.seed(1234)
+#rainforest.model <- train(log(SalePrice) ~  GrLivArea +  GarageCars + 
+#    OverallQual+ KitchenQual + BsmtQual + OverallCond + X1stFlrSF + X2ndFlrSF + 
+#    PoolArea + ExterQual +  LotArea + TotRmsAbvGrd + 
+#    MSSubClass + YearBuilt, 
+#      method="rf",
+#      preProcess=c("center","scale"),
+#      data= train_data)
+
+#rainforest.model
+## Out of sample RMSE for Rain forest
+
+```
+
+### Step 21 : Using KNN Model 
+```{r}
+set.seed(1234)
+model.knn <- train(log(SalePrice) ~ ., 
+      method="knn",
+      preProcess=c("center","scale"),
+      data= train_data)
+
+(model.knn)
+## Out of sample RMSE for KNN 
+##0.190087
+```
+## Step 22 : Analysisng Data and effect of diffrent most Significant Predictors that were commonly identified through LM, KNN, GLMNET,Random Forst  with ggplot 
+### Impact of the most significant factor OverallQual on Sale Price
+```{r}
+# Overall Quality is the most significant factor in predicting sale price
+train_data %>% 
+  ggplot(aes(OverallQual,SalePrice)) +
+  geom_point()+
+  theme_bw()
+```
+### Identifying which neighbourhood are having expensive Homes
+```{r}
+# Identifying which neighbourhood are having expensive Homes
+train_data %>%
+  group_by(Neighborhood) %>%
+  summarise(median.price = median(SalePrice, na.rm = TRUE)) %>%
+  arrange(median.price) %>%
+  mutate(nhbr.sorted = factor(Neighborhood, levels=Neighborhood)) %>%
+  ggplot(aes(x=nhbr.sorted, y=median.price)) +
+  geom_point() +
+  geom_text(aes(label = median.price, angle = 45), vjust = 2) +
+  theme_minimal() +
+  labs(x='Neighborhood', y='Median price') +
+  theme(text = element_text(size=12),
+        axis.text.x = element_text(angle=45))
+
+```
+### Identifying GrLivingArea Impact on Housing Price
+```{r}
+## Identifying GrLivingArea Impact on Housing Price
+ggplot(train_data, aes(x=GrLivArea)) +
+  geom_histogram(fill='orange',color='white') +
+  theme_minimal()
+```
+### Kitchen Quality also matters in Sale Price
+```{r}
+ggplot(data=train_data, aes(x=KitchenQual, y=SalePrice, fill=KitchenQual)) + geom_bar(stat="identity")
+  
+```
+### We LOtArea and Neighbourhood are corelated and in some areas LotArea is contributing to higher Slae Price while in some area it is not that much significant factor.
+```{r}
+ggplot(train_data, aes(SalePrice, LotArea, col = Neighborhood)) +
+  geom_point() + 
+  stat_smooth(method = "lm", se = F)
+
+```
+## So based on comparison of different models, we found that Glmnet mixed model performance was best based on out of sample RMSE
+### Kaggle score : 0.13575
+### Kaggle Rank :1822
